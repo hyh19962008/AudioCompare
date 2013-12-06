@@ -6,10 +6,10 @@ similarity. A file that is likely to have been derived from another
 is flagged as a match.
 
 To run the program, type one of:
-   ./p4500 -f <file1> -f <file2>
-   ./p4500 -f <file1> -d <dir1>
-   ./p4500 -d <dir1> -f <file1>
-   ./p4500 -d <dir1> -d <dir2>
+* ./audiocompare -f _file1_ -f _file2_
+* ./audiocompare -f _file1_ -d _dir1_
+* ./audiocompare -d _dir1_ -f _file1_
+* ./audiocompare -d _dir1_ -d _dir2_
 
 Arguments following a "-f" argument must be a filename,
 and arguments following a "-d" argument must be a directory
