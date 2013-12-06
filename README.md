@@ -37,10 +37,10 @@ for CS 4500, Fall 2013, with Professor William Clinger
 at Northeastern University.
 
 The team members were:
-An Dang
-Cory Finger
-Zheng Hui Er
-Charles Connell
+* An Dang (@dangan249)
+* Cory Finger (@fingerco)
+* Zheng Hui Er (@zh-er)
+* Charles Connell (@charlesconnell)
 
 
 Third-Party Software Acknowledgements
