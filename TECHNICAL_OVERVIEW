@@ -1,4 +1,3 @@
-
 Please see individual files for descriptions of individual methods
 
 main.py
@@ -6,7 +5,7 @@ main.py
  - Opens input files
  - Runs matching algorithm on them
 
-Wang.py
+Matcher.py
  - Contains the code for the matching
    algorithm that we chose
 
