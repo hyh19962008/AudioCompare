@@ -23,6 +23,9 @@ non-matching files were compared, and "MATCH ..."
 if two matching files were compared, listing the two
 files that matched, and giving the match score.
 
+This program is intended to run on Linux. Compatibility with OS X
+or Windows would not be difficult, but has not been attempted yet.
+
 Dependencies
 ------------
 
