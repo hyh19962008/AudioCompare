@@ -132,8 +132,8 @@ def _file_fingerprint(filename):
         # efficient.
         fingerprints = _to_fingerprints(series)
 
-    except Exception, e:
-        return FileErrorResult(e.message)
+    except Exception as e:
+        return FileErrorResult(str(e))
 
     return FileResult(fingerprints, file_len, filename)
 
