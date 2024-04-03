@@ -5,6 +5,7 @@ import shutil
 import subprocess 
 import os
 import time
+from distutils.spawn import find_executable
 
 
 class InputFile:
@@ -22,7 +23,12 @@ class InputFile:
 
         At the end of this constructor. self.wav_file will be positioned
         at the first byte of audio data in the file."""
-        lame = os.path.dirname(os.path.abspath(__file__)) + "/lame"
+        
+        # use system installed lame if possible
+        if find_executable("lame"):
+            lame = find_executable("lame")
+        else:
+            lame = os.path.dirname(os.path.abspath(__file__)) + "/lame"
 
         original_name = filename
         self.wav_file = open( filename, "r" )

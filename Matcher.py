@@ -218,7 +218,7 @@ class Matcher(object):
         return results
 
     @staticmethod
-    def __report_file_matches(file, master_hash, file_lengths):
+    def __report_file_matches(file, master_hash, file_lengths, file_match_offsets):
         """Find files from the master hash that match
         the given file.
         @param file A FileResult object that is our query
@@ -229,18 +229,6 @@ class Matcher(object):
 
         results = []
 
-        # A hash that maps filenames to "offset" hashes. Then,
-        # an offset hash maps the difference in chunk numbers of
-        # the matches we will find.
-        # We'll map those differences to the number of matches
-        # found with that difference.
-        # This allows us to see if many fingerprints
-        # from different files occurred at the same
-        # time offsets relative to each other.
-        file_match_offsets = {}
-        for f in file_lengths:
-            file_match_offsets[f] = defaultdict(lambda: 0)
-
         # For each chunk in the query file
         for query_chunk_index in xrange(len(file.fingerprints)):
             # See if that chunk's fingerprint is in our master hash
@@ -250,7 +238,9 @@ class Matcher(object):
                 # and the found chunk
                 for matching_chunk in master_hash[chunk_fingerprint]:
                     offset = matching_chunk.chunk_index - query_chunk_index
-                    file_match_offsets[matching_chunk.filename][offset] += 1
+                    # could be None when comparing same directory
+                    if file_match_offsets.get(matching_chunk.filename):
+                        file_match_offsets[matching_chunk.filename][offset] += 1
 
         # For each file that was in master_hash,
         # we examine the offsets of the matching fingerprints we found
@@ -290,9 +280,6 @@ class Matcher(object):
         and returns a boolean as output, indicating
         if the two files match."""
 
-        dir1_files = Matcher.__search_dir(self.dir1)
-        dir2_files = Matcher.__search_dir(self.dir2)
-
         # Try to determine how many
         # processors are in the computer
         # we're running on, to determine
@@ -306,83 +293,142 @@ class Matcher(object):
         # Construct a process pool to give the task of
         # fingerprinting audio files
         pool = multiprocessing.Pool(cpus)
-        try:
-            # Get the fingerprints from each input file.
-            # Do this using a pool of processes in order
-            # to parallelize the work neatly.
-            map1_result = pool.map_async(_file_fingerprint, dir1_files)
-            map2_result = pool.map_async(_file_fingerprint, dir2_files)
 
-            # Wait for pool to finish processing
-            pool.close()
-            pool.join()
+        if self.dir1 != self.dir2:
+            dir1_files = Matcher.__search_dir(self.dir1)
+            dir2_files = Matcher.__search_dir(self.dir2)
+            
+            try:
+                # Get the fingerprints from each input file.
+                # Do this using a pool of processes in order
+                # to parallelize the work neatly.
+                map1_result = pool.map_async(_file_fingerprint, dir1_files)
+                map2_result = pool.map_async(_file_fingerprint, dir2_files)
 
-            # Get results from process pool
-            dir1_results = map1_result.get()
-            dir2_results = map2_result.get()
+                # Wait for pool to finish processing
+                pool.close()
+                pool.join()
 
-        except KeyboardInterrupt:
-            pool.terminate()
-            raise
+                # Get results from process pool
+                dir1_results = map1_result.get()
+                dir2_results = map2_result.get()
 
-        results = []
+            except KeyboardInterrupt:
+                pool.terminate()
+                raise
 
-        # If there was an error in fingerprinting a file,
-        # add a special ErrorResult to our results list
-        results.extend(filter(lambda x: not x.success, dir1_results))
-        results.extend(filter(lambda x: not x.success, dir2_results))
+            results = []
 
-        # Proceed only with fingerprints that were computed
-        # successfully
-        dir1_successes = filter(lambda x: x.success and x.file_len > 0, dir1_results)
-        dir2_successes = filter(lambda x: x.success and x.file_len > 0, dir2_results)
+            # If there was an error in fingerprinting a file,
+            # add a special ErrorResult to our results list
+            results.extend(filter(lambda x: not x.success, dir1_results))
+            results.extend(filter(lambda x: not x.success, dir2_results))
 
-        # Empty files should match other empty files
-        # Our matching algorithm will not report these as a match,
-        # so we have to make a special case for it.
-        dir1_empty_files = filter(lambda x: x.success and x.file_len == 0, dir1_results)
-        dir2_empty_files = filter(lambda x: x.success and x.file_len == 0, dir2_results)
+            # Proceed only with fingerprints that were computed
+            # successfully
+            dir1_successes = filter(lambda x: x.success and x.file_len > 0, dir1_results)
+            dir2_successes = filter(lambda x: x.success and x.file_len > 0, dir2_results)
 
-        # Every empty file should match every other empty file
-        for empty_file1, empty_file2 in itertools.product(dir1_empty_files, dir2_empty_files):
-            results.append(MatchResult(empty_file1.filename, empty_file2.filename, empty_file1.file_len, empty_file2.file_len, SCORE_THRESHOLD + 1))
+            # Empty files should match other empty files
+            # Our matching algorithm will not report these as a match,
+            # so we have to make a special case for it.
+            dir1_empty_files = filter(lambda x: x.success and x.file_len == 0, dir1_results)
+            dir2_empty_files = filter(lambda x: x.success and x.file_len == 0, dir2_results)
 
-        # This maps filenames to the lengths of the files
-        dir1_file_lengths = Matcher.__file_lengths(dir1_successes)
-        dir2_file_lengths = Matcher.__file_lengths(dir2_successes)
+            # Every empty file should match every other empty file
+            for empty_file1, empty_file2 in itertools.product(dir1_empty_files, dir2_empty_files):
+                results.append(MatchResult(empty_file1.filename, empty_file2.filename, empty_file1.file_len, empty_file2.file_len, SCORE_THRESHOLD + 1))
 
-        # Get the combined sizes of the files in our two search
-        # paths
-        dir1_size = sum(dir1_file_lengths.viewvalues())
-        dir2_size = sum(dir2_file_lengths.viewvalues())
+            # This maps filenames to the lengths of the files
+            dir1_file_lengths = Matcher.__file_lengths(dir1_successes)
+            dir2_file_lengths = Matcher.__file_lengths(dir2_successes)
 
-        # Whichever search path has more data in it is the
-        # one we want to put in the master hash, and then query
-        # via the other one
-        if dir1_size < dir2_size:
-            dir_successes = dir1_successes
-            master_hash = Matcher.__combine_hashes(dir2_successes)
-            file_lengths = dir2_file_lengths
+            # Get the combined sizes of the files in our two search
+            # paths
+            dir1_size = sum(dir1_file_lengths.viewvalues())
+            dir2_size = sum(dir2_file_lengths.viewvalues())
+
+            # Whichever search path has more data in it is the
+            # one we want to put in the master hash, and then query
+            # via the other one
+            if dir1_size < dir2_size:
+                dir_successes = dir1_successes
+                master_hash = Matcher.__combine_hashes(dir2_successes)
+                file_lengths = dir2_file_lengths
+            else:
+                dir_successes = dir2_successes
+                master_hash = Matcher.__combine_hashes(dir1_successes)
+                file_lengths = dir1_file_lengths
+
+            # A hash that maps filenames to "offset" hashes. Then,
+            # an offset hash maps the difference in chunk numbers of
+            # the matches we will find.
+            # We'll map those differences to the number of matches
+            # found with that difference.
+            # This allows us to see if many fingerprints
+            # from different files occurred at the same
+            # time offsets relative to each other.
+            file_match_offsets = {}
+            for f in file_lengths:
+                file_match_offsets[f] = defaultdict(lambda: 0)
+
+            # Loop through each file in the first search path our
+            # program was given.
+            for file in dir_successes:
+                # For each file, check its fingerprints against those in the
+                # second search path. For matching
+                # fingerprints, look up the the times (chunk number)
+                # that the fingerprint occurred
+                # in each file. Store the time differences in
+                # offsets. The point of this is to see if there
+                # are many matching fingerprints at the
+                # same time difference relative to each
+                # other. This indicates that the two files
+                # contain similar audio.
+                file_matches = Matcher.__report_file_matches(file, master_hash, file_lengths, file_match_offsets.copy())
+                results.extend(file_matches)
+
+        # comparing the same file/directory
         else:
-            dir_successes = dir2_successes
-            master_hash = Matcher.__combine_hashes(dir1_successes)
-            file_lengths = dir1_file_lengths
+            dir1_files = Matcher.__search_dir(self.dir1)
 
-        # Loop through each file in the first search path our
-        # program was given.
-        for file in dir_successes:
-            # For each file, check its fingerprints against those in the
-            # second search path. For matching
-            # fingerprints, look up the the times (chunk number)
-            # that the fingerprint occurred
-            # in each file. Store the time differences in
-            # offsets. The point of this is to see if there
-            # are many matching fingerprints at the
-            # same time difference relative to each
-            # other. This indicates that the two files
-            # contain similar audio.
-            file_matches = Matcher.__report_file_matches(file, master_hash, file_lengths)
-            results.extend(file_matches)
+            try:
+                map1_result = pool.map_async(_file_fingerprint, dir1_files)
+                pool.close()
+                pool.join()
+
+                # Get results from process pool
+                dir1_results = map1_result.get()
+
+            except KeyboardInterrupt:
+                pool.terminate()
+                raise
+
+            results = []
+
+            results.extend(filter(lambda x: not x.success, dir1_results))
+
+            dir1_successes = filter(lambda x: x.success and x.file_len > 0, dir1_results)
+
+            dir1_empty_files = filter(lambda x: x.success and x.file_len == 0, dir1_results)
+
+            # Every empty file should match every other empty file
+            for empty_file1, empty_file2 in itertools.product(dir1_empty_files, dir1_empty_files):
+                results.append(MatchResult(empty_file1.filename, empty_file2.filename, empty_file1.file_len, empty_file2.file_len, SCORE_THRESHOLD + 1))
+
+            dir1_file_lengths = Matcher.__file_lengths(dir1_successes)
+
+            master_hash = Matcher.__combine_hashes(dir1_successes)
+
+            file_match_offsets = {}
+            for f in dir1_file_lengths:
+                file_match_offsets[f] = defaultdict(lambda: 0)
+
+            for file in dir1_successes:
+                file_matches = Matcher.__report_file_matches(file, master_hash, dir1_file_lengths, file_match_offsets.copy())
+                # reduce duplicate results
+                file_match_offsets.pop(file.filename)
+                results.extend(file_matches)
 
         return results
 
